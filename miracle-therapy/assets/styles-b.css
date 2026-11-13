@@ -113,3 +113,30 @@
 .b-final p { color: var(--cocoa); max-width: 36em; margin: 0 auto 30px; }
 .b-final .cta-row { justify-content: center; }
 @media (max-width: 560px) { .b-final .cta-row .btn { flex: 1 1 100%; } }
+
+/* ==========================================================================
+   WHITE THEME for version B — loaded after the B layout rules.
+   Light surfaces everywhere; the dark highlights strip and buy band become
+   light grey so the page flows into the white Shopify checkout.
+   ========================================================================== */
+.b-announce { background: var(--cream); color: var(--espresso); }
+.b .site-header { background: rgba(255, 255, 255, .95); }
+.b-hero { background: linear-gradient(180deg, #FAFAFB 0%, #FFFFFF 80%); }
+.b-arch { background: radial-gradient(circle at 50% 35%, #FFFFFF 0%, #F6F6F7 60%, #ECECEF 100%); }
+
+/* Highlights strip: was dark */
+.b-strip { background: var(--cream); color: var(--espresso); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+/* Buy band: was dark */
+.b-buy { background: var(--cream); color: var(--espresso); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.b-buy h2 { color: var(--espresso); }
+.b-buy .eyebrow { color: var(--gold-deep); }
+.b-buy .price-note, .b-buy .info-list li { color: var(--cocoa); }
+.b-buy .info-list a { color: var(--espresso); }
+.b-buy .info-list svg { color: var(--gold-deep); }
+.b-buy .b-arch { background: radial-gradient(circle at 50% 35%, #FFFFFF 0%, #FFFFFF 55%, #EEEEF1 100%); }
+.b-buy .btn-ghost { color: var(--espresso); border-color: var(--espresso); }
+.b-buy .btn-ghost:hover { background: var(--espresso); color: #FFFFFF; }
+
+/* Final call to action: was blush */
+.b-final { background: linear-gradient(180deg, #FFFFFF, var(--cream)); }

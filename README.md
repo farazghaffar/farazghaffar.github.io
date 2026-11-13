@@ -2,7 +2,7 @@
 
 A/B landing pages for shop.prohall.ai, served by GitHub Pages on the custom domain **prohall.us** (see `CNAME`).
 
-**Test: layout.** A = classic layout, B = editorial layout. Headline, copy, photos, price and buttons are identical on A and B.
+**Test: layout.** A = classic layout, B = editorial layout, both in the white theme that matches Shopify checkout. Headline, copy, photos, price and buttons are identical on A and B.
 
 | Product | A | B |
 |---|---|---|
