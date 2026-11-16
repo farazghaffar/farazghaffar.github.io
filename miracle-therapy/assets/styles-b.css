@@ -140,3 +140,13 @@
 
 /* Final call to action: was blush */
 .b-final { background: linear-gradient(180deg, #FFFFFF, var(--cream)); }
+
+/* Product photos in the arch (B): centred, no square box (see white-base.css). */
+.b-arch { display: grid; place-items: center; isolation: isolate; }
+.b-arch img {
+  width: 68%; height: auto; aspect-ratio: 1; max-height: none;
+  object-fit: contain; object-position: 50% 50%;
+  mix-blend-mode: multiply; filter: none;
+  transform: translateY(6%);   /* optical centre: the arch's round top makes true centre look high */
+}
+.b-gallery img { mix-blend-mode: multiply; }

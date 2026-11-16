@@ -305,3 +305,27 @@ body { background: #FFFFFF; }
 
 /* Sticky phone bar */
 .sticky-buy { background: rgba(255, 255, 255, .97); }
+
+/* --------------------------------------------------------------------------
+   Product photos: no square box, perfectly centred in the circle (A).
+   The store photos sit on a white square, so:
+   - mix-blend-mode: multiply makes that white disappear into the circle,
+   - no drop-shadow (a shadow traces the photo's square edge),
+   - circle and photo share one grid cell, so both are centred exactly,
+   - a square, object-fit: contain frame keeps tall and wide photos centred.
+   -------------------------------------------------------------------------- */
+.hero-visual { display: grid; place-items: center; isolation: isolate; }
+.hero-visual .halo { position: relative; grid-area: 1 / 1; width: min(92%, 470px); aspect-ratio: 1; }
+.hero-visual img {
+  position: relative; grid-area: 1 / 1;
+  width: min(68%, 340px); height: auto; aspect-ratio: 1; max-height: none;
+  object-fit: contain; object-position: 50% 50%;
+  mix-blend-mode: multiply; filter: none;
+}
+.buy-card .pack { display: grid; place-items: center; isolation: isolate; aspect-ratio: 1; }
+.buy-card .pack img { width: 82%; height: auto; aspect-ratio: 1; max-height: none; object-fit: contain; mix-blend-mode: multiply; filter: none; }
+.gallery img { mix-blend-mode: multiply; }
+@media (max-width: 880px) {
+  .hero-visual .halo { width: min(70%, 280px); }
+  .hero-visual img { width: min(50%, 200px); max-height: none; }
+}
