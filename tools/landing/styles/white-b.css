@@ -1,0 +1,37 @@
+
+/* ==========================================================================
+   WHITE THEME for version B — loaded after the B layout rules.
+   Light surfaces everywhere; the dark highlights strip and buy band become
+   light grey so the page flows into the white Shopify checkout.
+   ========================================================================== */
+.b-announce { background: var(--cream); color: var(--espresso); }
+.b .site-header { background: rgba(255, 255, 255, .95); }
+.b-hero { background: linear-gradient(180deg, #FAFAFB 0%, #FFFFFF 80%); }
+.b-arch { background: radial-gradient(circle at 50% 35%, #FFFFFF 0%, #F6F6F7 60%, #ECECEF 100%); }
+
+/* Highlights strip: was dark */
+.b-strip { background: var(--cream); color: var(--espresso); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+
+/* Buy band: was dark */
+.b-buy { background: var(--cream); color: var(--espresso); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.b-buy h2 { color: var(--espresso); }
+.b-buy .eyebrow { color: var(--gold-deep); }
+.b-buy .price-note, .b-buy .info-list li { color: var(--cocoa); }
+.b-buy .info-list a { color: var(--espresso); }
+.b-buy .info-list svg { color: var(--gold-deep); }
+.b-buy .b-arch { background: radial-gradient(circle at 50% 35%, #FFFFFF 0%, #FFFFFF 55%, #EEEEF1 100%); }
+.b-buy .btn-ghost { color: var(--espresso); border-color: var(--espresso); }
+.b-buy .btn-ghost:hover { background: var(--espresso); color: #FFFFFF; }
+
+/* Final call to action: was blush */
+.b-final { background: linear-gradient(180deg, #FFFFFF, var(--cream)); }
+
+/* Product photos in the arch (B): centred, no square box (see white-base.css). */
+.b-arch { display: grid; place-items: center; isolation: isolate; }
+.b-arch img {
+  width: 68%; height: auto; aspect-ratio: 1; max-height: none;
+  object-fit: contain; object-position: 50% 50%;
+  mix-blend-mode: multiply; filter: none;
+  transform: translateY(6%);   /* optical centre: the arch's round top makes true centre look high */
+}
+.b-gallery img { mix-blend-mode: multiply; }
