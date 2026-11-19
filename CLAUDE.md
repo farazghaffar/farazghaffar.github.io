@@ -12,5 +12,6 @@ Static A/B landing pages served by GitHub Pages from this repo. Builder: `tools/
 
 ## Don't
 - Don't edit the hand-published pairs (`select-one/`, `miracle-therapy/`, `equalize/`, `burix-one/`, `absolut-one/`) unless the user asks; the builder will not write into folders without `landing.lock.json`.
+- Labels: every pair carries `data-split-section` / `data-split-cta` (see README → "Split labels"). After any page change run `python3 tools/landing/build.py check` (all pairs) and the unit tests.
 - Don't add a second Split loader: `render.split_tag()` is the only place the hosted tag is rendered.
 - Don't claim live tracking works without seeing events from an active run's QA links (`list_runs` → `qaA`/`qaB`, then `get_results` with `source: "direct"`).

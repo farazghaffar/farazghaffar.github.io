@@ -103,8 +103,43 @@ class TrackedLandingPages(unittest.TestCase):
         self.assertEqual(found["a"], found["b"])
         sections, ctas = found["a"]
         self.assertEqual(sections, sorted(["hero", "benefits", "details", "ingredients", "how-to-use", "pricing", "faq", "final-cta"]))
-        self.assertEqual(ctas, sorted(["header-buy", "hero-buy", "hero-how-to", "mid-page-buy", "pricing-buy-4-oz",
+        self.assertEqual(ctas, sorted(["nav-benefits", "nav-how-to-use", "nav-faq",
+                                       "header-buy", "hero-buy", "hero-how-to", "mid-page-buy", "pricing-buy-4-oz",
                                        "pricing-buy-10-oz", "final-buy", "browse-all", "sticky-buy"]))
+        # every button label sits on an <a>, never on a wrapper
+        for v in "ab":
+            page = read(self.root, "labels", v, "index.html")
+            self.assertEqual(re.findall(r'<(?!a )[a-z]+ [^>]*data-split-cta=', page), [])
+
+    def test_labels_are_configurable_per_pair(self):
+        run(self.root, "new", "custom", "--product", "select-one", "--experiment", "custom-experiment-0004")
+        cfg_path = os.path.join(self.root, "pages", "custom.json")
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        cfg["split_labels"] = {"sections": {"pricing": "offer"}, "ctas": {"hero-buy": "hero-add-to-cart"}}
+        with open(cfg_path, "w") as f:
+            json.dump(cfg, f)
+        run(self.root, "build", "custom")
+        for v in "ab":
+            page = read(self.root, "custom", v, "index.html")
+            self.assertIn('data-split-section="offer"', page)
+            self.assertNotIn('data-split-section="pricing"', page)
+            self.assertIn('data-split-cta="hero-add-to-cart"', page)
+            self.assertNotIn('data-split-cta="hero-buy"', page)
+
+    def test_rejects_bad_labels(self):
+        run(self.root, "new", "badlabel", "--product", "select-one")
+        cfg_path = os.path.join(self.root, "pages", "badlabel.json")
+        for bad in [{"ctas": {"hero-buy": "Hero Buy"}}, {"ctas": {"hero-buy": "9-buy"}},
+                    {"ctas": {"hero-buy": "final-buy"}}, {"sections": {"nope": "x"}}]:
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+            cfg["split_labels"] = bad
+            with open(cfg_path, "w") as f:
+                json.dump(cfg, f)
+            r = run(self.root, "build", "badlabel", ok=False)
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertFalse(os.path.exists(os.path.join(self.root, "badlabel")), bad)
 
     def test_rejects_ids_that_are_not_experiment_ids(self):
         for bad in ["8069155422385", "b7f73a06d88a5a9c24df", "Select One"]:
@@ -132,6 +167,19 @@ class TrackedLandingPages(unittest.TestCase):
         for slug in ["select-one", "miracle-therapy", "equalize", "burix-one", "absolut-one"]:
             if os.path.isdir(os.path.join(REPO, slug)):
                 self.assertFalse(os.path.exists(os.path.join(REPO, slug, "landing.lock.json")), slug)
+
+
+    def test_every_published_pair_passes_check(self):
+        """All pairs in this repository (built and hand-published): one Split tag with the same
+        id on A and B, valid labels identical on A and B, supported Shopify links."""
+        r = subprocess.run([sys.executable, BUILD, "check"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_redirect_pages_keep_the_query_string(self):
+        for name in ["index.html", "404.html"]:
+            page = read(REPO, name)
+            self.assertIn("location.replace('https://shop.prohall.ai/collections/all' + location.search)", page)
+            self.assertNotIn("external-landing.js", page)
 
 
 if __name__ == "__main__":

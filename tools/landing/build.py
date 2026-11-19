@@ -3,7 +3,7 @@
 
   python3 tools/landing/build.py new <slug> --product <product> [--experiment <split-experiment-id>]
   python3 tools/landing/build.py build <slug>
-  python3 tools/landing/build.py check [<slug> ...]
+  python3 tools/landing/build.py check [<slug> ...]      (no slug = every pair in the site)
 
 A pair is configured by pages/<slug>.json (a frozen copy of the product content
 plus its own experiment_id) and published at /<slug>/a/ and /<slug>/b/.
@@ -61,6 +61,10 @@ def validate_config(cfg, slug):
         raise BuildError("handle must be a Shopify product handle, e.g. prohall-select-one")
     if not re.fullmatch(r"\d+", str(cfg.get("shopify_product_id", ""))):
         raise BuildError("shopify_product_id must be the numeric Shopify product id (Split run sales breakdown)")
+    try:
+        render.split_labels(cfg)
+    except ValueError as err:
+        raise BuildError(str(err))
     variants = cfg.get("variants") or []
     if not variants:
         raise BuildError("at least one Shopify variant is required")
@@ -132,7 +136,7 @@ def cmd_build(args):
         print(f"  A  {SITE}/{slug}/a/")
         print(f"  B  {SITE}/{slug}/b/")
         print(f"  Split run: promoted Shopify product ID {cfg['shopify_product_id']}")
-    problems = check(root, args.slugs)
+    problems = check(root, args.slugs, pages_dir)
     for p in problems:
         print("CHECK FAILED:", p)
     if problems:
@@ -140,50 +144,107 @@ def cmd_build(args):
 
 
 TAG_RE = re.compile(r'<script[^>]*src="' + re.escape(render.SPLIT_SCRIPT_SRC) + r'"[^>]*>', re.S)
-EXPECTED_SECTIONS = {"hero", "benefits", "details", "ingredients", "how-to-use", "pricing", "faq", "final-cta"}
-EXPECTED_CTAS = {"header-buy", "hero-buy", "hero-how-to", "mid-page-buy", "final-buy", "browse-all", "sticky-buy"}
+LABEL_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
+# Every pair (built or hand-published) must have at least these placements.
+CORE_SECTIONS = {"hero", "pricing", "faq", "final-cta"}
+CORE_CTAS = {"header-buy", "hero-buy", "final-buy", "browse-all", "sticky-buy"}
+SHOP_PATH_RE = re.compile(r"/|/products/[a-z0-9-]+|/collections/[a-z0-9-]+|/cart|/cart/\d+:(10|[1-9])|/policies/[a-z-]+")
 
 
-def check(root, slugs=None):
-    """Verify built pairs: one Split tag per page (zero when blank), same id on A and B,
-    labels present and matching across A/B, Shopify links in supported formats."""
+def all_pairs(root):
+    """Every published A/B pair: <slug>/a/index.html and <slug>/b/index.html."""
+    return sorted(d for d in os.listdir(root)
+                  if all(os.path.isfile(os.path.join(root, d, v, "index.html")) for v in "ab"))
+
+
+def check_page(page, where):
+    """Label/link problems on one rendered page, and its (sections, ctas)."""
     problems = []
-    if not slugs:
-        slugs = sorted(d for d in os.listdir(root) if os.path.exists(os.path.join(root, d, LOCK)))
-    for slug in slugs:
-        with open(os.path.join(root, slug, LOCK)) as f:
-            lock = json.load(f)
-        labels = {}
+    for tag, attr, name in re.findall(r'<([a-zA-Z]+)\b[^>]*?\s(data-split-(?:section|cta))="([^"]*)"', page):
+        if not LABEL_RE.match(name):
+            problems.append(f"{where}: label {name!r} does not match ^[a-z][a-z0-9-]{{0,47}}$")
+        if attr == "data-split-cta" and tag.lower() not in ("a", "button"):
+            problems.append(f"{where}: data-split-cta={name!r} is on <{tag}>, not on the clickable <a>/<button>")
+    sections = re.findall(r'data-split-section="([^"]*)"', page)
+    ctas = re.findall(r'data-split-cta="([^"]*)"', page)
+    for kind, names in (("section", sections), ("button", ctas)):
+        dup = sorted(n for n in set(names) if names.count(n) > 1)
+        if dup:
+            problems.append(f"{where}: duplicate {kind} labels {dup}")
+    if len(set(sections) | set(ctas)) > 64:
+        problems.append(f"{where}: more than 64 labels")
+    for href in re.findall(r'href="(https://shop\.prohall\.ai[^"]*)"', page):
+        if not SHOP_PATH_RE.fullmatch(href[len("https://shop.prohall.ai"):]):
+            problems.append(f"{where}: unsupported Shopify link {href}")
+    return problems, set(sections), set(ctas)
+
+
+def check(root, slugs=None, pages_dir=None):
+    """Verify every pair (default: all pairs in the site):
+    * configured pages load exactly one Split tag, A and B with the same experiment id
+      (built pairs: the id in their lock file); unconfigured pages load none;
+    * section/button labels are valid, unique, on the right elements and identical on A and B;
+    * built pairs carry every label their config asks for; every pair has the core placements;
+    * Shopify links use the supported formats."""
+    pages_dir = pages_dir or os.path.join(root, "pages")
+    problems = []
+    for slug in slugs or all_pairs(root):
+        lock_path = os.path.join(root, slug, LOCK)
+        lock = json.load(open(lock_path)) if os.path.exists(lock_path) else None
+        found, ids = {}, {}
         for v in ("a", "b"):
-            page = open(os.path.join(root, slug, v, "index.html")).read()
+            with open(os.path.join(root, slug, v, "index.html")) as f:
+                page = f.read()
+            where = f"{slug}/{v}"
             tags = TAG_RE.findall(page)
-            ids = re.findall(r'data-split-experiment="([^"]*)"', page)
-            if lock["experiment_id"]:
-                if len(tags) != 1 or ids != [lock["experiment_id"]]:
-                    problems.append(f"{slug}/{v}: expected 1 Split tag for {lock['experiment_id']}, found {len(tags)} {ids}")
-            elif tags or ids or "external-landing.js" in page:
-                problems.append(f"{slug}/{v}: blank experiment must render no Split tag")
-            sections = set(re.findall(r'<section [^>]*data-split-section="([a-z0-9-]+)"', page))
-            ctas = re.findall(r'<a [^>]*data-split-cta="([a-z0-9-]+)"', page)
-            if not EXPECTED_SECTIONS <= sections:
-                problems.append(f"{slug}/{v}: missing sections {sorted(EXPECTED_SECTIONS - sections)}")
-            if not EXPECTED_CTAS <= set(ctas):
-                problems.append(f"{slug}/{v}: missing buttons {sorted(EXPECTED_CTAS - set(ctas))}")
-            if len(ctas) != len(set(ctas)):
-                problems.append(f"{slug}/{v}: duplicate button labels {sorted(c for c in set(ctas) if ctas.count(c) > 1)}")
-            for href in re.findall(r'href="(https://shop\.prohall\.ai[^"]*)"', page):
-                path = href[len("https://shop.prohall.ai"):]
-                if not re.fullmatch(r"/|/products/[a-z0-9-]+|/collections/[a-z0-9-]+|/cart|/cart/\d+:(10|[1-9])|/policies/[a-z-]+", path):
-                    problems.append(f"{slug}/{v}: unsupported Shopify link {href}")
-            labels[v] = (sections, sorted(ctas))
-        if labels["a"] != labels["b"]:
-            problems.append(f"{slug}: A and B labels differ: {labels['a']} vs {labels['b']}")
+            ids[v] = re.findall(r'data-split-experiment="([^"]*)"', page)
+            if len(tags) > 1 or len(ids[v]) > 1 or len(tags) != len(ids[v]):
+                problems.append(f"{where}: expected at most 1 Split tag, found {len(tags)} {ids[v]}")
+            elif not tags and "external-landing.js" in page:
+                problems.append(f"{where}: stray external-landing.js reference")
+            for t in tags:
+                if 'data-split-storefront="shop.prohall.ai"' not in t:
+                    problems.append(f"{where}: Split tag lacks data-split-storefront=\"shop.prohall.ai\"")
+            if lock is not None:
+                want = [lock["experiment_id"]] if lock["experiment_id"] else []
+                if ids[v] != want:
+                    problems.append(f"{where}: expected Split tag for {lock['experiment_id'] or '(none)'}, found {ids[v]}")
+            p, sections, ctas = check_page(page, where)
+            problems += p
+            found[v] = (sections, ctas)
+        if ids["a"] != ids["b"]:
+            problems.append(f"{slug}: A and B have different experiment ids {ids['a']} vs {ids['b']}")
+        if found["a"] != found["b"]:
+            problems.append(f"{slug}: A and B labels differ: {found['a']} vs {found['b']}")
+        cfg_path = os.path.join(pages_dir, slug + ".json")
+        if lock is not None and os.path.exists(cfg_path):
+            with open(cfg_path) as f:   # built pair: exactly the labels its config asks for
+                want_s, want_c = render.expected_labels(json.load(f))
+        else:                           # hand-published pair: at least the core placements
+            want_s, want_c = CORE_SECTIONS, CORE_CTAS
+        for v in ("a", "b"):
+            if want_s - found[v][0]:
+                problems.append(f"{slug}/{v}: missing sections {sorted(want_s - found[v][0])}")
+            if want_c - found[v][1]:
+                problems.append(f"{slug}/{v}: missing buttons {sorted(want_c - found[v][1])}")
     return problems
+
+
+def report(root, slugs):
+    """Print one line per pair: experiment id and label counts (what the browser console check shows)."""
+    for slug in slugs or all_pairs(root):
+        for v in ("a", "b"):
+            with open(os.path.join(root, slug, v, "index.html")) as f:
+                page = f.read()
+            exp = re.findall(r'data-split-experiment="([^"]*)"', page)
+            print(f"  /{slug}/{v}/  experiment={exp[0] if exp else '(none)'}  "
+                  f"sections={page.count('data-split-section=')}  buttons={page.count('data-split-cta=')}")
 
 
 def cmd_check(args):
     root, _ = paths(args.root, None)
-    problems = check(root, args.slugs)
+    problems = check(root, args.slugs, args.pages_dir and os.path.abspath(args.pages_dir))
+    report(root, args.slugs)
     for p in problems:
         print("CHECK FAILED:", p)
     if problems:
@@ -202,7 +263,7 @@ def main(argv=None):
     n.add_argument("--experiment", default="", help="Split experiment id from list_experiments (blank = no tag)")
     b = sub.add_parser("build", help="render <slug>/a/ and <slug>/b/ from pages/<slug>.json")
     b.add_argument("slugs", nargs="+")
-    c = sub.add_parser("check", help="verify built pairs")
+    c = sub.add_parser("check", help="verify every pair (or the given ones): Split tag, labels, Shopify links")
     c.add_argument("slugs", nargs="*")
     args = ap.parse_args(argv)
     try:

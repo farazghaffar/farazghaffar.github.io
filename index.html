@@ -3,8 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="robots" content="noindex">
-  <meta http-equiv="refresh" content="0; url=https://shop.prohall.ai/collections/all">
   <title>Prohall</title>
+  <!-- Redirect to the store, keeping the incoming query string (split_landing,
+       split_heatmap_preview, utm_*, fbclid) so Split attribution survives the hop. -->
+  <script>
+    location.replace('https://shop.prohall.ai/collections/all' + location.search);
+  </script>
+  <noscript><meta http-equiv="refresh" content="0; url=https://shop.prohall.ai/collections/all"></noscript>
 </head>
 <body>
   <p><a href="https://shop.prohall.ai/collections/all">Continue to the Prohall store</a></p>

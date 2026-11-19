@@ -1,9 +1,10 @@
 """Render one Prohall A/B landing-page pair from its config (pages/<slug>.json).
 
 Layout A = classic, layout B = editorial; both use the white theme. Every
-clickable shopping control is created by cta() with a placement label
-(data-split-cta) and every section carries data-split-section, so the hosted
-Split tag can report section views and button clicks. The Split tag itself is
+clickable link is created by cta() with a placement label (data-split-cta) and
+every section carries data-split-section, so the hosted Split tag can report
+section views and button clicks. Labels default to DEFAULT_SECTION_LABELS /
+DEFAULT_CTA_LABELS and can be renamed per pair with "split_labels" in the config. The Split tag itself is
 rendered once, from the pair's own experiment_id, or not at all when it is blank.
 """
 import html
@@ -15,7 +16,22 @@ SPLIT_SCRIPT_SRC = "https://split-ivory-one.vercel.app/external-landing.js"
 SPLIT_STOREFRONT = "shop.prohall.ai"
 e = html.escape
 
-_LABEL_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_LABEL_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")   # Split label format
+
+# Standard placements and their default Split labels. A pair can rename any of them
+# in pages/<slug>.json -> "split_labels": {"sections": {...}, "ctas": {...}}.
+DEFAULT_SECTION_LABELS = {
+    "hero": "hero", "benefits": "benefits", "details": "details", "ingredients": "ingredients",
+    "how-to-use": "how-to-use", "gallery": "gallery", "pricing": "pricing", "faq": "faq",
+    "final-cta": "final-cta",
+}
+DEFAULT_CTA_LABELS = {
+    "nav-benefits": "nav-benefits", "nav-how-to-use": "nav-how-to-use", "nav-faq": "nav-faq",
+    "header-buy": "header-buy", "hero-buy": "hero-buy", "hero-how-to": "hero-how-to",
+    "mid-page-buy": "mid-page-buy",
+    "pricing-buy": "pricing-buy",   # one size: this label; several sizes: pricing-buy-<size>
+    "final-buy": "final-buy", "browse-all": "browse-all", "sticky-buy": "sticky-buy",
+}
 _EXPERIMENT_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -47,6 +63,40 @@ def split_tag(experiment_id):
         f'    data-split-experiment="{e(experiment_id)}"\n'
         f'    data-split-storefront="{SPLIT_STOREFRONT}"></script>\n'
     )
+
+
+def split_labels(p):
+    """Resolved {"sections": {slot: label}, "ctas": {slot: label}} for a pair config."""
+    cfg = p.get("split_labels") or {}
+    unknown = set(cfg) - {"sections", "ctas"}
+    if unknown:
+        raise ValueError(f"split_labels has unknown keys {sorted(unknown)}; use 'sections' and 'ctas'")
+    out = {}
+    for kind, defaults in (("sections", DEFAULT_SECTION_LABELS), ("ctas", DEFAULT_CTA_LABELS)):
+        over = cfg.get(kind) or {}
+        bad = set(over) - set(defaults)
+        if bad:
+            raise ValueError(f"split_labels.{kind} has unknown placements {sorted(bad)}; known: {sorted(defaults)}")
+        merged = {**defaults, **over}
+        for slot, label in merged.items():
+            if not isinstance(label, str) or not _LABEL_RE.match(label):
+                raise ValueError(f"split_labels.{kind}.{slot} = {label!r} must match ^[a-z][a-z0-9-]{{0,47}}$")
+        if len(set(merged.values())) != len(merged):
+            raise ValueError(f"split_labels.{kind}: each placement needs its own label")
+        out[kind] = merged
+    return out
+
+
+def expected_labels(p):
+    """(sections, ctas) the rendered pair must carry, for build.py check."""
+    lab = split_labels(p)
+    sections = {v for k, v in lab["sections"].items() if k != "gallery" or p.get("gallery")}
+    ctas = {v for k, v in lab["ctas"].items() if k != "pricing-buy"}
+    if len(p["variants"]) > 1:
+        ctas |= {lab["ctas"]["pricing-buy"] + "-" + label_slug(v["title"]) for v in p["variants"]}
+    else:
+        ctas.add(lab["ctas"]["pricing-buy"])
+    return sections, ctas
 
 
 def label_slug(text):
@@ -94,6 +144,8 @@ def money(v):
 
 
 def page_a(p):
+    labels = split_labels(p)
+    S, C = labels["sections"], labels["ctas"]   # Split section / button labels
     variant = "A"
     head = p["headline"]
     product_url = f"{STORE}/products/{p['handle']}"
@@ -135,7 +187,7 @@ def page_a(p):
             for i, g in enumerate(p["gallery"], 2))
         gallery = f'''
     <!-- ============ GALLERY ============ -->
-    <section class="section section-alt" id="gallery" data-split-section="gallery" aria-labelledby="gallery-title">
+    <section class="section section-alt" id="gallery" data-split-section="{S["gallery"]}" aria-labelledby="gallery-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">A closer look</p>
@@ -149,7 +201,7 @@ def page_a(p):
 
     if multi:
         size_cards = "".join(
-            "\n              " + cta(f"{STORE}/cart/{v['id']}:1", "pricing-buy-" + label_slug(v["title"]),
+            "\n              " + cta(f"{STORE}/cart/{v['id']}:1", C["pricing-buy"] + "-" + label_slug(v["title"]),
                 f'<span class="sz">{e(v["title"])}</span><span class="pr">{money(v["price"])}</span>'
                 f'<span class="go">Add {e(v["title"])} to cart &rarr;</span>', "size-card")
             for v in variants)
@@ -163,7 +215,7 @@ def page_a(p):
               <span class="price">{money(v["price"])}</span>
               <span class="price-note">USD &middot; final price, taxes and shipping shown at checkout</span>
             </div>'''
-        buy_ctas = cta(f"{STORE}/cart/{v['id']}:1", "pricing-buy", f"Add to cart &mdash; {money(v['price'])}")
+        buy_ctas = cta(f"{STORE}/cart/{v['id']}:1", C["pricing-buy"], f"Add to cart &mdash; {money(v['price'])}")
 
     other = "B" if variant == "A" else "A"
     return f'''<!doctype html>
@@ -190,10 +242,10 @@ def page_a(p):
     <div class="wrap">
       <span class="logo" aria-label="Prohall">PROHALL</span>
       <nav class="header-links" aria-label="Page">
-        <a class="hide-sm" href="#benefits">Benefits</a>
-        <a class="hide-sm" href="#how-to-use">How to use</a>
-        <a class="hide-sm" href="#faq">FAQ</a>
-        {cta(add_url, "header-buy", add_short)}
+        {cta("#benefits", C["nav-benefits"], "Benefits", "hide-sm")}
+        {cta("#how-to-use", C["nav-how-to-use"], "How to use", "hide-sm")}
+        {cta("#faq", C["nav-faq"], "FAQ", "hide-sm")}
+        {cta(add_url, C["header-buy"], add_short)}
       </nav>
     </div>
   </header>
@@ -201,7 +253,7 @@ def page_a(p):
   <main id="main">
 
     <!-- ============ HERO ============ -->
-    <section class="hero" data-split-section="hero" aria-labelledby="hero-title">
+    <section class="hero" data-split-section="{S["hero"]}" aria-labelledby="hero-title">
       <div class="wrap hero-grid">
         <div>
           <p class="eyebrow">{e(p["name"])}</p>
@@ -214,8 +266,8 @@ def page_a(p):
           </div>
 
           <div class="cta-row">
-            {cta(add_url, "hero-buy", add_label + " " + ARROW)}
-            {cta("#how-to-use", "hero-how-to", "See how to use it", "btn btn-ghost")}
+            {cta(add_url, C["hero-buy"], add_label + " " + ARROW)}
+            {cta("#how-to-use", C["hero-how-to"], "See how to use it", "btn btn-ghost")}
           </div>
 
           <ul class="chips" aria-label="Product highlights">{chips}</ul>
@@ -233,7 +285,7 @@ def page_a(p):
     </section>
 
     <!-- ============ BENEFITS ============ -->
-    <section class="section" id="benefits" data-split-section="benefits" aria-labelledby="benefits-title">
+    <section class="section" id="benefits" data-split-section="{S["benefits"]}" aria-labelledby="benefits-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">Benefits</p>
@@ -247,14 +299,14 @@ def page_a(p):
     </section>
 
     <!-- ============ WHO IT'S FOR + SPEC ============ -->
-    <section class="section section-alt" id="details" data-split-section="details" aria-labelledby="details-title">
+    <section class="section section-alt" id="details" data-split-section="{S["details"]}" aria-labelledby="details-title">
       <div class="wrap split">
         <div>
           <p class="eyebrow">{e(p["who"]["eyebrow"])}</p>
           <h2 id="details-title">{e(p["who"]["title"])}</h2>
           <ul class="ticks">{ticks}
           </ul>
-          {cta(add_url, "mid-page-buy", add_short)}
+          {cta(add_url, C["mid-page-buy"], add_short)}
         </div>
 
         <aside class="spec" aria-label="Product details">
@@ -266,7 +318,7 @@ def page_a(p):
     </section>
 
     <!-- ============ FORMULA / KIT ============ -->
-    <section class="section section-dark" id="formula" data-split-section="ingredients" aria-labelledby="formula-title">
+    <section class="section section-dark" id="formula" data-split-section="{S["ingredients"]}" aria-labelledby="formula-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">{e(p["formula"]["eyebrow"])}</p>
@@ -279,7 +331,7 @@ def page_a(p):
     </section>
 
     <!-- ============ HOW TO USE ============ -->
-    <section class="section" id="how-to-use" data-split-section="how-to-use" aria-labelledby="howto-title">
+    <section class="section" id="how-to-use" data-split-section="{S["how-to-use"]}" aria-labelledby="howto-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">How to use</p>
@@ -295,7 +347,7 @@ def page_a(p):
     </section>
 {gallery}
     <!-- ============ BUYING INFORMATION ============ -->
-    <section class="section{"" if p.get("gallery") else " section-alt"}" id="buy" data-split-section="pricing" aria-labelledby="buy-title">
+    <section class="section{"" if p.get("gallery") else " section-alt"}" id="buy" data-split-section="{S["pricing"]}" aria-labelledby="buy-title">
       <div class="wrap">
         <div class="buy-card">
           <div class="pack">
@@ -330,7 +382,7 @@ def page_a(p):
     </section>
 
     <!-- ============ FAQ ============ -->
-    <section class="section{" section-alt" if p.get("gallery") else ""}" id="faq" data-split-section="faq" aria-labelledby="faq-title">
+    <section class="section{" section-alt" if p.get("gallery") else ""}" id="faq" data-split-section="{S["faq"]}" aria-labelledby="faq-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">FAQ</p>
@@ -342,14 +394,14 @@ def page_a(p):
     </section>
 
     <!-- ============ FINAL ACTION ============ -->
-    <section class="final" data-split-section="final-cta" aria-labelledby="final-title">
+    <section class="final" data-split-section="{S["final-cta"]}" aria-labelledby="final-title">
       <div class="wrap">
         <p class="eyebrow">Ready when you are</p>
         <h2 id="final-title">{e(p["final"]["title"])}</h2>
         <p>{e(p["final"]["text"])}</p>
         <div class="cta-row">
-          {cta(add_url, "final-buy", add_short, "btn btn-gold")}
-          {cta(STORE + "/collections/all", "browse-all", "All products", "btn btn-ghost")}
+          {cta(add_url, C["final-buy"], add_short, "btn btn-gold")}
+          {cta(STORE + "/collections/all", C["browse-all"], "All products", "btn btn-ghost")}
         </div>
       </div>
     </section>
@@ -370,7 +422,7 @@ def page_a(p):
 
   <div class="sticky-buy">
     <span class="s-name"><strong>{e(p["short"])}</strong>{price_label} &middot; {e(p["sticky_size"])}</span>
-    {cta(add_url, "sticky-buy", add_short)}
+    {cta(add_url, C["sticky-buy"], add_short)}
   </div>
 
 {split_tag(p.get("experiment_id", ""))}</body>
@@ -379,6 +431,8 @@ def page_a(p):
 
 
 def page_b(p):
+    labels = split_labels(p)
+    S, C = labels["sections"], labels["ctas"]   # Split section / button labels
     head = p["headline"]
     product_url = f"{STORE}/products/{p['handle']}"
     variants = p["variants"]
@@ -410,7 +464,7 @@ def page_b(p):
             for i, g in enumerate(p["gallery"], 2))
         gallery = f"""
     <!-- ============ GALLERY ============ -->
-    <section class="section" id="gallery" data-split-section="gallery" aria-labelledby="gallery-title">
+    <section class="section" id="gallery" data-split-section="{S["gallery"]}" aria-labelledby="gallery-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">A closer look</p>
@@ -423,7 +477,7 @@ def page_b(p):
 """
     if multi:
         size_cards = "".join(
-            "\n              " + cta(f"{STORE}/cart/{v['id']}:1", "pricing-buy-" + label_slug(v["title"]),
+            "\n              " + cta(f"{STORE}/cart/{v['id']}:1", C["pricing-buy"] + "-" + label_slug(v["title"]),
                 f'<span class="sz">{e(v["title"])}</span><span class="pr">{money(v["price"])}</span>'
                 f'<span class="go">Add {e(v["title"])} to cart &rarr;</span>', "size-card")
             for v in variants)
@@ -437,7 +491,7 @@ def page_b(p):
               <span class="price">{money(v["price"])}</span>
               <span class="price-note">USD &middot; final price, taxes and shipping shown at checkout</span>
             </div>"""
-        buy_ctas = cta(f"{STORE}/cart/{v['id']}:1", "pricing-buy", f"Add to cart &mdash; {money(v['price'])}")
+        buy_ctas = cta(f"{STORE}/cart/{v['id']}:1", C["pricing-buy"], f"Add to cart &mdash; {money(v['price'])}")
 
     return f"""<!doctype html>
 <html lang="en">
@@ -464,10 +518,10 @@ def page_b(p):
     <div class="wrap">
       <span class="logo" aria-label="Prohall">PROHALL</span>
       <nav class="header-links" aria-label="Page">
-        <a class="hide-sm" href="#benefits">Benefits</a>
-        <a class="hide-sm" href="#how-to-use">How to use</a>
-        <a class="hide-sm" href="#faq">FAQ</a>
-        {cta(add_url, "header-buy", add_short)}
+        {cta("#benefits", C["nav-benefits"], "Benefits", "hide-sm")}
+        {cta("#how-to-use", C["nav-how-to-use"], "How to use", "hide-sm")}
+        {cta("#faq", C["nav-faq"], "FAQ", "hide-sm")}
+        {cta(add_url, C["header-buy"], add_short)}
       </nav>
     </div>
   </header>
@@ -475,7 +529,7 @@ def page_b(p):
   <main id="main">
 
     <!-- ============ HERO ============ -->
-    <section class="b-hero" data-split-section="hero" aria-labelledby="hero-title">
+    <section class="b-hero" data-split-section="{S["hero"]}" aria-labelledby="hero-title">
       <div class="wrap">
         <p class="eyebrow">{e(p["name"])}</p>
         <h1 id="hero-title">{e(head)}</h1>
@@ -485,8 +539,8 @@ def page_b(p):
           <span class="price-note">USD &middot; {e(p["size_note"])}</span>
         </div>
         <div class="cta-row">
-          {cta(add_url, "hero-buy", add_label + " " + ARROW)}
-          {cta("#how-to-use", "hero-how-to", "See how to use it", "btn btn-ghost")}
+          {cta(add_url, C["hero-buy"], add_label + " " + ARROW)}
+          {cta("#how-to-use", C["hero-how-to"], "See how to use it", "btn btn-ghost")}
         </div>
         <div class="b-arch">
           <img src="{img(p["hero"]["url"], 900)}" width="{hero_w}" height="{hero_h}" alt="{e(p["hero"]["alt"])}">
@@ -498,13 +552,13 @@ def page_b(p):
     <div class="b-strip"><ul aria-label="Product highlights">{strip}</ul></div>
 
     <!-- ============ BENEFITS ============ -->
-    <section class="section" id="benefits" data-split-section="benefits" aria-labelledby="benefits-title">
+    <section class="section" id="benefits" data-split-section="{S["benefits"]}" aria-labelledby="benefits-title">
       <div class="wrap b-benefits">
         <div class="intro">
           <p class="eyebrow">Benefits</p>
           <h2 id="benefits-title">{e(p["benefits_title"])}</h2>
           <p>{e(p["benefits_intro"])}</p>
-          {cta(add_url, "mid-page-buy", add_short)}
+          {cta(add_url, C["mid-page-buy"], add_short)}
         </div>
         <ol class="b-list">{blist}
         </ol>
@@ -512,7 +566,7 @@ def page_b(p):
     </section>
 
     <!-- ============ WHO IT'S FOR + SPEC ============ -->
-    <section class="section section-alt" id="details" data-split-section="details" aria-labelledby="details-title">
+    <section class="section section-alt" id="details" data-split-section="{S["details"]}" aria-labelledby="details-title">
       <div class="wrap b-who">
         <div class="section-head center">
           <p class="eyebrow">{e(p["who"]["eyebrow"])}</p>
@@ -526,7 +580,7 @@ def page_b(p):
     </section>
 
     <!-- ============ FORMULA / KIT ============ -->
-    <section class="section" id="formula" data-split-section="ingredients" aria-labelledby="formula-title">
+    <section class="section" id="formula" data-split-section="{S["ingredients"]}" aria-labelledby="formula-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">{e(p["formula"]["eyebrow"])}</p>
@@ -539,7 +593,7 @@ def page_b(p):
     </section>
 
     <!-- ============ HOW TO USE ============ -->
-    <section class="section section-alt" id="how-to-use" data-split-section="how-to-use" aria-labelledby="howto-title">
+    <section class="section section-alt" id="how-to-use" data-split-section="{S["how-to-use"]}" aria-labelledby="howto-title">
       <div class="wrap">
         <div class="section-head center">
           <p class="eyebrow">How to use</p>
@@ -555,7 +609,7 @@ def page_b(p):
     </section>
 {gallery}
     <!-- ============ BUYING INFORMATION ============ -->
-    <section class="b-buy" id="buy" data-split-section="pricing" aria-labelledby="buy-title">
+    <section class="b-buy" id="buy" data-split-section="{S["pricing"]}" aria-labelledby="buy-title">
       <div class="wrap">
         <div class="b-arch">
           <img src="{img(p["hero"]["url"], 600)}" width="{hero_w}" height="{hero_h}" loading="lazy" alt="{e(p["hero"]["alt"])}">
@@ -586,7 +640,7 @@ def page_b(p):
     </section>
 
     <!-- ============ FAQ ============ -->
-    <section class="section" id="faq" data-split-section="faq" aria-labelledby="faq-title">
+    <section class="section" id="faq" data-split-section="{S["faq"]}" aria-labelledby="faq-title">
       <div class="wrap b-faq">
         <div>
           <p class="eyebrow">FAQ</p>
@@ -598,14 +652,14 @@ def page_b(p):
     </section>
 
     <!-- ============ FINAL ACTION ============ -->
-    <section class="b-final" data-split-section="final-cta" aria-labelledby="final-title">
+    <section class="b-final" data-split-section="{S["final-cta"]}" aria-labelledby="final-title">
       <div class="wrap">
         <p class="eyebrow">Ready when you are</p>
         <h2 id="final-title">{e(p["final"]["title"])}</h2>
         <p>{e(p["final"]["text"])}</p>
         <div class="cta-row">
-          {cta(add_url, "final-buy", add_short)}
-          {cta(STORE + "/collections/all", "browse-all", "All products", "btn btn-ghost")}
+          {cta(add_url, C["final-buy"], add_short)}
+          {cta(STORE + "/collections/all", C["browse-all"], "All products", "btn btn-ghost")}
         </div>
       </div>
     </section>
@@ -626,7 +680,7 @@ def page_b(p):
 
   <div class="sticky-buy">
     <span class="s-name"><strong>{e(p["short"])}</strong>{price_label} &middot; {e(p["sticky_size"])}</span>
-    {cta(add_url, "sticky-buy", add_short)}
+    {cta(add_url, C["sticky-buy"], add_short)}
   </div>
 
 {split_tag(p.get("experiment_id", ""))}</body>
